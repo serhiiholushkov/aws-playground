@@ -1,0 +1,6 @@
+@CognitoPlayground_HostAddress = http://localhost:5186
+
+GET {{CognitoPlayground_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
