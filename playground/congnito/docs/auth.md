@@ -70,6 +70,593 @@ No `cognito-idp:*` IAM permissions are needed on the backend for this pattern.
 
 ## Further Reading
 
+**Cognito: auth flows & tokens**
+
 - [Amazon Cognito user pool authentication flow](https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-authentication-flow.html) — USER_PASSWORD_AUTH, USER_SRP_AUTH, ADMIN_USER_PASSWORD_AUTH explained
+- [Using tokens with Cognito user pools](https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-using-tokens-with-identity-providers.html) — access / ID / refresh token lifetimes and use cases
+- [Verifying a Cognito JWT](https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-using-tokens-verifying-a-jwt.html) — how to validate the signature, issuer, expiry, and claims step by step
+
+**Cognito: API reference**
+
+- [SignUp](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_SignUp.html) · [ConfirmSignUp](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_ConfirmSignUp.html) · [InitiateAuth](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_InitiateAuth.html) — public (unauthenticated) client-side calls used in Pattern A
+- [AdminInitiateAuth](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminInitiateAuth.html) — server-side IAM-authenticated call used in Pattern B
+
+**Frontend SDK**
+
+- [amazon-cognito-identity-js README](https://github.com/aws-amplify/amplify-js/tree/main/packages/amazon-cognito-identity-js#readme) — full API for `CognitoUserPool`, `CognitoUser`, `authenticateUser`, `signUp`, `getSession`, etc.
+
+**Backend JWT validation**
+
 - [JWT Bearer authentication in ASP.NET Core](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/jwt-authn) — how the backend validates tokens (Pattern A backend side)
+
+**Architecture**
+
 - [AWS Well-Architected: Serverless identity and access management](https://docs.aws.amazon.com/wellarchitected/latest/serverless-applications-lens/identity-and-access-management.html)
+
+---
+
+## Implementation Guide
+
+### Step 0: Collect CDK stack outputs
+
+After `cdk deploy`, the stack prints three values needed for configuration:
+
+```
+Outputs:
+CognitoStack.UserPoolId       = us-east-1_XXXXXXXXX
+CognitoStack.UserPoolClientId = 26xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+CognitoStack.Region           = us-east-1
+```
+
+Both patterns require the same three values: `Region`, `UserPoolId`, and `UserPoolClientId`.
+
+---
+
+### Pattern A — Frontend-direct
+
+#### UI (Nuxt)
+
+**1. Install the Cognito identity library**
+
+```bash
+pnpm add amazon-cognito-identity-js
+```
+
+**2. Add runtime config**
+
+Expose the Cognito values as public runtime config in `nuxt.config.ts`:
+
+```typescript
+export default defineNuxtConfig({
+  // ...existing config...
+  runtimeConfig: {
+    public: {
+      cognitoRegion: '', // set via NUXT_PUBLIC_COGNITO_REGION
+      cognitoUserPoolId: '', // set via NUXT_PUBLIC_COGNITO_USER_POOL_ID
+      cognitoClientId: '', // set via NUXT_PUBLIC_COGNITO_CLIENT_ID
+    },
+  },
+});
+```
+
+Set the values in `.env` (never commit to source control):
+
+```
+NUXT_PUBLIC_COGNITO_REGION=us-east-1
+NUXT_PUBLIC_COGNITO_USER_POOL_ID=us-east-1_XXXXXXXXX
+NUXT_PUBLIC_COGNITO_CLIENT_ID=26xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+**3. Create an auth composable**
+
+`app/composables/useAuth.ts`:
+
+```typescript
+import {
+  CognitoUserPool,
+  CognitoUser,
+  CognitoUserAttribute,
+  AuthenticationDetails,
+  type CognitoUserSession,
+} from 'amazon-cognito-identity-js';
+
+export function useAuth() {
+  const config = useRuntimeConfig();
+
+  const userPool = new CognitoUserPool({
+    UserPoolId: config.public.cognitoUserPoolId,
+    ClientId: config.public.cognitoClientId,
+  });
+
+  function signUp(
+    name: string,
+    email: string,
+    password: string,
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const attributes = [
+        new CognitoUserAttribute({ Name: 'name', Value: name }),
+        new CognitoUserAttribute({ Name: 'email', Value: email }),
+      ];
+      userPool.signUp(email, password, attributes, [], (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  }
+
+  function confirmSignUp(email: string, code: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const user = new CognitoUser({ Username: email, Pool: userPool });
+      user.confirmRegistration(code, true, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  }
+
+  function signIn(
+    email: string,
+    password: string,
+  ): Promise<CognitoUserSession> {
+    return new Promise((resolve, reject) => {
+      const user = new CognitoUser({ Username: email, Pool: userPool });
+      const authDetails = new AuthenticationDetails({
+        Username: email,
+        Password: password,
+      });
+      // Uses USER_SRP_AUTH by default (password never sent in plaintext)
+      user.authenticateUser(authDetails, {
+        onSuccess: resolve,
+        onFailure: reject,
+      });
+    });
+  }
+
+  function signOut() {
+    userPool.getCurrentUser()?.signOut();
+  }
+
+  // Returns a fresh access token, auto-refreshing if expired
+  function getAccessToken(): Promise<string | null> {
+    return new Promise((resolve) => {
+      const user = userPool.getCurrentUser();
+      if (!user) return resolve(null);
+      user.getSession(
+        (err: Error | null, session: CognitoUserSession | null) => {
+          if (err || !session?.isValid()) return resolve(null);
+          resolve(session.getAccessToken().getJwtToken());
+        },
+      );
+    });
+  }
+
+  return { signUp, confirmSignUp, signIn, signOut, getAccessToken };
+}
+```
+
+> **Source:** all methods above (`signUp`, `confirmRegistration`, `authenticateUser`, `getSession`) are part of the [`amazon-cognito-identity-js`](https://github.com/aws-amplify/amplify-js/tree/main/packages/amazon-cognito-identity-js#readme) library. The README documents every method, its parameters, and callback signatures.
+
+> `amazon-cognito-identity-js` stores tokens in `localStorage` automatically after a successful `authenticateUser` call. `getSession()` transparently refreshes the access token using the stored refresh token when it expires.
+
+> **SSR note:** `localStorage` is browser-only. Wrap composable usage in `<ClientOnly>` or guard with `import.meta.client` when used in server-rendered pages.
+
+**4. Wire up the login page**
+
+In `app/pages/login.vue`, replace the stub `onSubmit`:
+
+```typescript
+const { signIn } = useAuth();
+const router = useRouter();
+
+async function onSubmit(payload: FormSubmitEvent<Schema>) {
+  try {
+    await signIn(payload.data.email, payload.data.password);
+    await router.push('/');
+  } catch (err: any) {
+    toast.add({
+      title: 'Login failed',
+      description: err.message,
+      color: 'error',
+    });
+  }
+}
+```
+
+**5. Wire up the signup page**
+
+In `app/pages/signup.vue`:
+
+```typescript
+const { signUp } = useAuth();
+const router = useRouter();
+
+// After signUp succeeds, redirect to a confirmation page where the user enters the code
+async function onSubmit(payload: FormSubmitEvent<Schema>) {
+  try {
+    await signUp(payload.data.name, payload.data.email, payload.data.password);
+    await router.push({
+      path: '/confirm',
+      query: { email: payload.data.email },
+    });
+  } catch (err: any) {
+    toast.add({
+      title: 'Sign up failed',
+      description: err.message,
+      color: 'error',
+    });
+  }
+}
+```
+
+**6. Attach the token to API requests**
+
+Create a Nuxt plugin `app/plugins/api.ts` that injects an authenticated `$fetch` instance:
+
+```typescript
+export default defineNuxtPlugin(() => {
+  const { getAccessToken } = useAuth();
+
+  const $api = $fetch.create({
+    baseURL: useRuntimeConfig().public.apiBaseUrl,
+    async onRequest({ options }) {
+      const token = await getAccessToken();
+      if (token) {
+        options.headers = {
+          ...options.headers,
+          Authorization: `Bearer ${token}`,
+        };
+      }
+    },
+  });
+
+  return { provide: { api: $api } };
+});
+```
+
+Use `useNuxtApp().$api(...)` instead of `$fetch` for any calls to protected backend endpoints.
+
+---
+
+#### Backend (ASP.NET Core)
+
+**1. Add the JWT Bearer package**
+
+```bash
+dotnet add package Microsoft.AspNetCore.Authentication.JwtBearer
+```
+
+**2. Configure authentication in `Program.cs`**
+
+```csharp
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+
+var region     = builder.Configuration["Cognito:Region"]!;
+var userPoolId = builder.Configuration["Cognito:UserPoolId"]!;
+var authority  = $"https://cognito-idp.{region}.amazonaws.com/{userPoolId}";
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.Authority = authority;
+        options.TokenValidationParameters = new()
+        {
+            ValidIssuer = authority,
+            // Cognito access tokens do not carry an `aud` claim; the client ID
+            // appears in the `client_id` claim instead, so audience validation
+            // must be disabled when accepting access tokens as Bearer credentials.
+            ValidateAudience = false,
+        };
+    });
+
+builder.Services.AddAuthorization();
+```
+
+Then, after `var app = builder.Build()`, add the middleware **in this order**:
+
+```csharp
+app.UseAuthentication();
+app.UseAuthorization();
+```
+
+> **Source:** the `Authority` + `ValidateAudience = false` combination is the standard setup for Cognito — see the official guidance in [Verifying a Cognito JWT](https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-using-tokens-verifying-a-jwt.html). The `aud` claim is absent from Cognito access tokens (present only on ID tokens), which is why audience validation must be disabled when accepting access tokens as Bearer credentials.
+
+**3. Protect endpoints**
+
+```csharp
+app.MapGet("/me", (ClaimsPrincipal user) => Results.Ok(new
+{
+    sub   = user.FindFirst("sub")?.Value,
+    email = user.FindFirst("email")?.Value,
+}))
+.RequireAuthorization();
+```
+
+**4. Set configuration values**
+
+Use user-secrets for local development:
+
+```bash
+dotnet user-secrets set "Cognito:Region"     "us-east-1"
+dotnet user-secrets set "Cognito:UserPoolId" "us-east-1_XXXXXXXXX"
+```
+
+In production, supply these as environment variables (`COGNITO__REGION`, `COGNITO__USERPOOLID`) or via AWS Systems Manager Parameter Store / Secrets Manager. The `ClientId` is not needed by the backend in Pattern A — JWT signature and issuer validation are sufficient.
+
+---
+
+### Pattern B — Backend-proxied
+
+#### Backend (ASP.NET Core)
+
+**1. Add the required packages**
+
+```bash
+dotnet add package AWSSDK.CognitoIdentityProvider
+dotnet add package Microsoft.AspNetCore.Authentication.JwtBearer
+```
+
+**2. Grant IAM permissions**
+
+The backend's execution role (ECS task role, EC2 instance profile, Lambda execution role, etc.) needs:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "cognito-idp:AdminInitiateAuth",
+    "cognito-idp:SignUp",
+    "cognito-idp:ConfirmSignUp"
+  ],
+  "Resource": "arn:aws:cognito-idp:{region}:{account-id}:userpool/{userPoolId}"
+}
+```
+
+> `SignUp` and `ConfirmSignUp` are unauthenticated public Cognito operations when `generateSecret: false`; they are listed for completeness but do not strictly require IAM. `AdminInitiateAuth` does require the IAM permission.
+
+> **Source:** [AdminInitiateAuth API reference](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminInitiateAuth.html) — documents `AuthFlow` values, required `AuthParameters` keys, and the `AuthenticationResult` response shape (`AccessToken`, `IdToken`, `RefreshToken`, `ExpiresIn`).
+
+**3. Add auth endpoints to `Program.cs`**
+
+```csharp
+using System.Security.Claims;
+using Amazon.CognitoIdentityProvider;
+using Amazon.CognitoIdentityProvider.Model;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+
+var region     = builder.Configuration["Cognito:Region"]!;
+var userPoolId = builder.Configuration["Cognito:UserPoolId"]!;
+var clientId   = builder.Configuration["Cognito:ClientId"]!;
+var authority  = $"https://cognito-idp.{region}.amazonaws.com/{userPoolId}";
+
+// Cognito SDK client — picks up credentials from the IAM role automatically
+builder.Services.AddSingleton<IAmazonCognitoIdentityProvider>(
+    new AmazonCognitoIdentityProviderClient(Amazon.RegionEndpoint.GetBySystemName(region)));
+
+// JWT validation is still needed for protected endpoints (tokens are issued by
+// Cognito regardless of which pattern proxied them to the frontend)
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.Authority = authority;
+        options.TokenValidationParameters = new()
+        {
+            ValidIssuer = authority,
+            ValidateAudience = false,
+        };
+    });
+
+builder.Services.AddAuthorization();
+
+var app = builder.Build();
+app.UseAuthentication();
+app.UseAuthorization();
+
+// --- Sign-up ---
+app.MapPost("/auth/signup", async (SignUpDto req, IAmazonCognitoIdentityProvider cognito) =>
+{
+    await cognito.SignUpAsync(new SignUpRequest
+    {
+        ClientId = clientId,
+        Username = req.Email,
+        Password = req.Password,
+        UserAttributes =
+        [
+            new AttributeType { Name = "email", Value = req.Email },
+            new AttributeType { Name = "name",  Value = req.Name  },
+        ],
+    });
+    return Results.Ok();
+});
+
+// --- Confirm email ---
+app.MapPost("/auth/confirm", async (ConfirmDto req, IAmazonCognitoIdentityProvider cognito) =>
+{
+    await cognito.ConfirmSignUpAsync(new ConfirmSignUpRequest
+    {
+        ClientId         = clientId,
+        Username         = req.Email,
+        ConfirmationCode = req.Code,
+    });
+    return Results.Ok();
+});
+
+// --- Sign-in ---
+app.MapPost("/auth/login", async (LoginDto req, IAmazonCognitoIdentityProvider cognito) =>
+{
+    var response = await cognito.AdminInitiateAuthAsync(new AdminInitiateAuthRequest
+    {
+        UserPoolId     = userPoolId,
+        ClientId       = clientId,
+        AuthFlow       = AuthFlowType.ADMIN_USER_PASSWORD_AUTH,
+        AuthParameters = new() { ["USERNAME"] = req.Email, ["PASSWORD"] = req.Password },
+    });
+    var result = response.AuthenticationResult;
+    return Results.Ok(new
+    {
+        accessToken  = result.AccessToken,
+        idToken      = result.IdToken,
+        refreshToken = result.RefreshToken,
+    });
+});
+
+// --- Refresh ---
+app.MapPost("/auth/refresh", async (RefreshDto req, IAmazonCognitoIdentityProvider cognito) =>
+{
+    var response = await cognito.AdminInitiateAuthAsync(new AdminInitiateAuthRequest
+    {
+        UserPoolId     = userPoolId,
+        ClientId       = clientId,
+        AuthFlow       = AuthFlowType.REFRESH_TOKEN_AUTH,
+        AuthParameters = new() { ["REFRESH_TOKEN"] = req.RefreshToken },
+    });
+    var result = response.AuthenticationResult;
+    return Results.Ok(new { accessToken = result.AccessToken, idToken = result.IdToken });
+});
+
+// --- Protected example ---
+app.MapGet("/me", (ClaimsPrincipal user) => Results.Ok(new
+{
+    sub   = user.FindFirst("sub")?.Value,
+    email = user.FindFirst("email")?.Value,
+}))
+.RequireAuthorization();
+
+// DTOs
+record SignUpDto(string Name, string Email, string Password);
+record ConfirmDto(string Email, string Code);
+record LoginDto(string Email, string Password);
+record RefreshDto(string RefreshToken);
+```
+
+**4. Set configuration values**
+
+```bash
+dotnet user-secrets set "Cognito:Region"     "us-east-1"
+dotnet user-secrets set "Cognito:UserPoolId" "us-east-1_XXXXXXXXX"
+dotnet user-secrets set "Cognito:ClientId"   "26xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+```
+
+For local development without an IAM role, configure AWS credentials via environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`) or `~/.aws/credentials`.
+
+---
+
+#### UI (Nuxt)
+
+The frontend no longer calls Cognito directly — all auth calls go to the backend API.
+
+**1. Add runtime config**
+
+```typescript
+// nuxt.config.ts
+export default defineNuxtConfig({
+  // ...existing config...
+  runtimeConfig: {
+    public: {
+      apiBaseUrl: '', // set via NUXT_PUBLIC_API_BASE_URL
+    },
+  },
+});
+```
+
+**2. Create an auth composable**
+
+`app/composables/useAuth.ts`:
+
+```typescript
+const ACCESS_TOKEN_KEY = 'access_token';
+const REFRESH_TOKEN_KEY = 'refresh_token';
+
+export function useAuth() {
+  const config = useRuntimeConfig();
+  const api = $fetch.create({ baseURL: config.public.apiBaseUrl });
+
+  async function signUp(name: string, email: string, password: string) {
+    await api('/auth/signup', {
+      method: 'POST',
+      body: { name, email, password },
+    });
+  }
+
+  async function confirmSignUp(email: string, code: string) {
+    await api('/auth/confirm', { method: 'POST', body: { email, code } });
+  }
+
+  async function signIn(email: string, password: string) {
+    const tokens = await api<{ accessToken: string; refreshToken: string }>(
+      '/auth/login',
+      {
+        method: 'POST',
+        body: { email, password },
+      },
+    );
+    if (import.meta.client) {
+      localStorage.setItem(ACCESS_TOKEN_KEY, tokens.accessToken);
+      localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken);
+    }
+  }
+
+  function signOut() {
+    if (import.meta.client) {
+      localStorage.removeItem(ACCESS_TOKEN_KEY);
+      localStorage.removeItem(REFRESH_TOKEN_KEY);
+    }
+  }
+
+  function getAccessToken(): string | null {
+    return import.meta.client ? localStorage.getItem(ACCESS_TOKEN_KEY) : null;
+  }
+
+  return { signUp, confirmSignUp, signIn, signOut, getAccessToken };
+}
+```
+
+**3. Wire up the login page**
+
+In `app/pages/login.vue`, replace the stub `onSubmit`:
+
+```typescript
+const { signIn } = useAuth();
+const router = useRouter();
+
+async function onSubmit(payload: FormSubmitEvent<Schema>) {
+  try {
+    await signIn(payload.data.email, payload.data.password);
+    await router.push('/');
+  } catch (err: any) {
+    toast.add({
+      title: 'Login failed',
+      description: err.message,
+      color: 'error',
+    });
+  }
+}
+```
+
+**4. Attach the token to API requests**
+
+The `$fetch` interceptor plugin is identical to Pattern A — create `app/plugins/api.ts`:
+
+```typescript
+export default defineNuxtPlugin(() => {
+  const { getAccessToken } = useAuth();
+
+  const $api = $fetch.create({
+    baseURL: useRuntimeConfig().public.apiBaseUrl,
+    onRequest({ options }) {
+      const token = getAccessToken();
+      if (token) {
+        options.headers = {
+          ...options.headers,
+          Authorization: `Bearer ${token}`,
+        };
+      }
+    },
+  });
+
+  return { provide: { api: $api } };
+});
+```
+
+Use `useNuxtApp().$api(...)` for all authenticated requests to the backend.
