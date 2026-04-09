@@ -15,6 +15,16 @@ export default defineNuxtConfig({
 
   css: ['~/assets/css/main.css'],
 
+  // NUXT_PUBLIC_* env variables automatically override these at runtime
+  runtimeConfig: {
+    public: {
+      apiBaseUrl: 'http://localhost:5165',
+      cognitoRegion: 'us-east-1',
+      cognitoUserPoolId: '',
+      cognitoClientId: ''
+    }
+  },
+
   routeRules: {
     '/docs': { redirect: '/docs/getting-started', prerender: false }
   },
@@ -23,9 +33,7 @@ export default defineNuxtConfig({
 
   nitro: {
     prerender: {
-      routes: [
-        '/'
-      ],
+      routes: ['/'],
       crawlLinks: true
     }
   },
