@@ -8,7 +8,7 @@ useSeoMeta({
   title,
   ogTitle: title,
   description,
-  ogDescription: description
+  ogDescription: description,
 })
 
 defineOgImageComponent('Saas')
@@ -18,12 +18,12 @@ const isYearly = ref('0')
 const items = ref([
   {
     label: 'Monthly',
-    value: '0'
+    value: '0',
   },
   {
     label: 'Yearly',
-    value: '1'
-  }
+    value: '1',
+  },
 ])
 </script>
 

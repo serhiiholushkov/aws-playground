@@ -4,16 +4,16 @@ const route = useRoute()
 const items = computed(() => [{
   label: 'Docs',
   to: '/docs',
-  active: route.path.startsWith('/docs')
+  active: route.path.startsWith('/docs'),
 }, {
   label: 'Pricing',
-  to: '/pricing'
+  to: '/pricing',
 }, {
   label: 'Blog',
-  to: '/blog'
+  to: '/blog',
 }, {
   label: 'Changelog',
-  to: '/changelog'
+  to: '/changelog',
 }])
 </script>
 

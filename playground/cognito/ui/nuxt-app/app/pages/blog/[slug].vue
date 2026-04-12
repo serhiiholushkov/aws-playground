@@ -8,7 +8,7 @@ if (!post.value) {
 
 const { data: surround } = await useAsyncData(`${route.path}-surround`, () => {
   return queryCollectionItemSurroundings('posts', route.path, {
-    fields: ['description']
+    fields: ['description'],
   })
 })
 
@@ -19,16 +19,16 @@ useSeoMeta({
   title,
   ogTitle: title,
   description,
-  ogDescription: description
+  ogDescription: description,
 })
 
 if (post.value.image?.src) {
   defineOgImage({
-    url: post.value.image.src
+    url: post.value.image.src,
   })
 } else {
   defineOgImageComponent('Saas', {
-    headline: 'Blog'
+    headline: 'Blog',
   })
 }
 </script>
