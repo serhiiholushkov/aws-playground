@@ -6,7 +6,7 @@ Pattern A is used in Word Flow due to its simplicity: the frontend authenticates
 
 ### How it works
 
-1. Frontend calls Cognito APIs directly (e.g. via `amazon-cognito-identity-js` or AWS Amplify)
+1. Frontend calls Cognito APIs directly (e.g. via AWS Amplify v6)
 2. Cognito returns `idToken`, `accessToken`, `refreshToken` to the frontend
 3. Frontend includes the token in every API request: `Authorization: Bearer <accessToken>`
 4. Backend validates the JWT signature against Cognito's public JWKS endpoint — a plain HTTPS call, no SDK or IAM involved:
@@ -83,7 +83,8 @@ No `cognito-idp:*` IAM permissions are needed on the backend for this pattern.
 
 **Frontend SDK**
 
-- [amazon-cognito-identity-js README](https://github.com/aws-amplify/amplify-js/tree/main/packages/amazon-cognito-identity-js#readme) — full API for `CognitoUserPool`, `CognitoUser`, `authenticateUser`, `signUp`, `getSession`, etc.
+- [Amplify v6 Auth — use existing Cognito resources](https://docs.amplify.aws/javascript/build-a-backend/auth/use-existing-cognito-resources/) — how to configure `Amplify.configure()` against a CDK-deployed user pool without an Amplify backend
+- [Amplify v6 Auth — manage user sessions](https://docs.amplify.aws/javascript/frontend/auth/manage-user-sessions/) — `fetchAuthSession` API (replaces `getSession`), automatic token refresh
 
 **Backend JWT validation**
 
@@ -116,10 +117,10 @@ Both patterns require the same three values: `Region`, `UserPoolId`, and `UserPo
 
 #### UI (Nuxt)
 
-**1. Install the Cognito identity library**
+**1. Install the Amplify library**
 
 ```bash
-pnpm add amazon-cognito-identity-js
+pnpm add aws-amplify
 ```
 
 **2. Add runtime config**
@@ -147,101 +148,80 @@ NUXT_PUBLIC_COGNITO_USER_POOL_ID=us-east-1_XXXXXXXXX
 NUXT_PUBLIC_COGNITO_CLIENT_ID=26xxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-**3. Create an auth composable**
+**3. Create an Amplify configuration plugin**
+
+`app/plugins/amplify.ts` — configure Amplify once at startup using the runtime config values:
+
+```typescript
+import { Amplify } from 'aws-amplify';
+
+export default defineNuxtPlugin(() => {
+  const config = useRuntimeConfig();
+  Amplify.configure({
+    Auth: {
+      Cognito: {
+        userPoolId: config.public.cognitoUserPoolId,
+        userPoolClientId: config.public.cognitoClientId,
+      },
+    },
+  });
+});
+```
+
+**4. Create an auth composable**
 
 `app/composables/useAuth.ts`:
 
 ```typescript
 import {
-  CognitoUserPool,
-  CognitoUser,
-  CognitoUserAttribute,
-  AuthenticationDetails,
-  type CognitoUserSession,
-} from 'amazon-cognito-identity-js';
+  signUp as amplifySignUp,
+  confirmSignUp as amplifyConfirmSignUp,
+  signIn as amplifySignIn,
+  signOut as amplifySignOut,
+  fetchAuthSession,
+} from 'aws-amplify/auth';
 
 export function useAuth() {
-  const config = useRuntimeConfig();
-
-  const userPool = new CognitoUserPool({
-    UserPoolId: config.public.cognitoUserPoolId,
-    ClientId: config.public.cognitoClientId,
-  });
-
-  function signUp(
+  async function signUp(
     name: string,
     email: string,
     password: string,
   ): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const attributes = [
-        new CognitoUserAttribute({ Name: 'name', Value: name }),
-        new CognitoUserAttribute({ Name: 'email', Value: email }),
-      ];
-      userPool.signUp(email, password, attributes, [], (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
+    await amplifySignUp({
+      username: email,
+      password,
+      options: { userAttributes: { name, email } },
     });
   }
 
-  function confirmSignUp(email: string, code: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const user = new CognitoUser({ Username: email, Pool: userPool });
-      user.confirmRegistration(code, true, (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
+  async function confirmSignUp(email: string, code: string): Promise<void> {
+    await amplifyConfirmSignUp({ username: email, confirmationCode: code });
   }
 
-  function signIn(
-    email: string,
-    password: string,
-  ): Promise<CognitoUserSession> {
-    return new Promise((resolve, reject) => {
-      const user = new CognitoUser({ Username: email, Pool: userPool });
-      const authDetails = new AuthenticationDetails({
-        Username: email,
-        Password: password,
-      });
-      // Uses USER_SRP_AUTH by default (password never sent in plaintext)
-      user.authenticateUser(authDetails, {
-        onSuccess: resolve,
-        onFailure: reject,
-      });
-    });
+  async function signIn(email: string, password: string): Promise<void> {
+    // Uses USER_SRP_AUTH by default (password never sent in plaintext)
+    await amplifySignIn({ username: email, password });
   }
 
-  function signOut() {
-    userPool.getCurrentUser()?.signOut();
+  async function signOut(): Promise<void> {
+    await amplifySignOut();
   }
 
   // Returns a fresh access token, auto-refreshing if expired
-  function getAccessToken(): Promise<string | null> {
-    return new Promise((resolve) => {
-      const user = userPool.getCurrentUser();
-      if (!user) return resolve(null);
-      user.getSession(
-        (err: Error | null, session: CognitoUserSession | null) => {
-          if (err || !session?.isValid()) return resolve(null);
-          resolve(session.getAccessToken().getJwtToken());
-        },
-      );
-    });
+  async function getAccessToken(): Promise<string | null> {
+    const session = await fetchAuthSession();
+    return session.tokens?.accessToken?.toString() ?? null;
   }
 
   return { signUp, confirmSignUp, signIn, signOut, getAccessToken };
 }
 ```
 
-> **Source:** all methods above (`signUp`, `confirmRegistration`, `authenticateUser`, `getSession`) are part of the [`amazon-cognito-identity-js`](https://github.com/aws-amplify/amplify-js/tree/main/packages/amazon-cognito-identity-js#readme) library. The README documents every method, its parameters, and callback signatures.
-
-> `amazon-cognito-identity-js` stores tokens in `localStorage` automatically after a successful `authenticateUser` call. `getSession()` transparently refreshes the access token using the stored refresh token when it expires.
+> **Source:** all functions above (`signUp`, `confirmSignUp`, `signIn`, `signOut`, `fetchAuthSession`) are tree-shakeable named exports from [`aws-amplify/auth`](https://docs.amplify.aws/javascript/frontend/auth/). Amplify v6 stores tokens in `localStorage` automatically after a successful `signIn` call. `fetchAuthSession()` transparently refreshes the access token using the stored refresh token when it expires.
 
 > **SSR note:** `localStorage` is browser-only. Wrap composable usage in `<ClientOnly>` or guard with `import.meta.client` when used in server-rendered pages.
 
-**4. Wire up the login page**
+**5. Wire up the login page**
 
 In `app/pages/login.vue`, replace the stub `onSubmit`:
 
@@ -263,7 +243,7 @@ async function onSubmit(payload: FormSubmitEvent<Schema>) {
 }
 ```
 
-**5. Wire up the signup page**
+**6. Wire up the signup page**
 
 In `app/pages/signup.vue`:
 
@@ -289,7 +269,7 @@ async function onSubmit(payload: FormSubmitEvent<Schema>) {
 }
 ```
 
-**6. Attach the token to API requests**
+**7. Attach the token to API requests**
 
 Create a Nuxt plugin `app/plugins/api.ts` that injects an authenticated `$fetch` instance:
 
