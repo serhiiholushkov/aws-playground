@@ -132,9 +132,9 @@ export default defineNuxtConfig({
   // ...existing config...
   runtimeConfig: {
     public: {
-      cognitoRegion: '', // set via NUXT_PUBLIC_COGNITO_REGION
-      cognitoUserPoolId: '', // set via NUXT_PUBLIC_COGNITO_USER_POOL_ID
-      cognitoClientId: '', // set via NUXT_PUBLIC_COGNITO_CLIENT_ID
+      cognitoRegion: "", // set via NUXT_PUBLIC_COGNITO_REGION
+      cognitoUserPoolId: "", // set via NUXT_PUBLIC_COGNITO_USER_POOL_ID
+      cognitoClientId: "", // set via NUXT_PUBLIC_COGNITO_CLIENT_ID
     },
   },
 });
@@ -153,7 +153,7 @@ NUXT_PUBLIC_COGNITO_CLIENT_ID=26xxxxxxxxxxxxxxxxxxxxxxxxxxxx
 `app/plugins/amplify.ts` — configure Amplify once at startup using the runtime config values:
 
 ```typescript
-import { Amplify } from 'aws-amplify';
+import { Amplify } from "aws-amplify";
 
 export default defineNuxtPlugin(() => {
   const config = useRuntimeConfig();
@@ -179,7 +179,7 @@ import {
   signIn as amplifySignIn,
   signOut as amplifySignOut,
   fetchAuthSession,
-} from 'aws-amplify/auth';
+} from "aws-amplify/auth";
 
 export function useAuth() {
   async function signUp(
@@ -232,12 +232,12 @@ const router = useRouter();
 async function onSubmit(payload: FormSubmitEvent<Schema>) {
   try {
     await signIn(payload.data.email, payload.data.password);
-    await router.push('/');
-  } catch (err: any) {
+    await router.push("/");
+  } catch (err: unknown) {
     toast.add({
-      title: 'Login failed',
-      description: err.message,
-      color: 'error',
+      title: "Login failed",
+      description: err instanceof Error ? err.message : String(err),
+      color: "error",
     });
   }
 }
@@ -256,14 +256,14 @@ async function onSubmit(payload: FormSubmitEvent<Schema>) {
   try {
     await signUp(payload.data.name, payload.data.email, payload.data.password);
     await router.push({
-      path: '/confirm',
+      path: "/confirm",
       query: { email: payload.data.email },
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     toast.add({
-      title: 'Sign up failed',
-      description: err.message,
-      color: 'error',
+      title: "Sign up failed",
+      description: err instanceof Error ? err.message : String(err),
+      color: "error",
     });
   }
 }
@@ -534,7 +534,7 @@ export default defineNuxtConfig({
   // ...existing config...
   runtimeConfig: {
     public: {
-      apiBaseUrl: '', // set via NUXT_PUBLIC_API_BASE_URL
+      apiBaseUrl: "", // set via NUXT_PUBLIC_API_BASE_URL
     },
   },
 });
@@ -545,29 +545,29 @@ export default defineNuxtConfig({
 `app/composables/useAuth.ts`:
 
 ```typescript
-const ACCESS_TOKEN_KEY = 'access_token';
-const REFRESH_TOKEN_KEY = 'refresh_token';
+const ACCESS_TOKEN_KEY = "access_token";
+const REFRESH_TOKEN_KEY = "refresh_token";
 
 export function useAuth() {
   const config = useRuntimeConfig();
   const api = $fetch.create({ baseURL: config.public.apiBaseUrl });
 
   async function signUp(name: string, email: string, password: string) {
-    await api('/auth/signup', {
-      method: 'POST',
+    await api("/auth/signup", {
+      method: "POST",
       body: { name, email, password },
     });
   }
 
   async function confirmSignUp(email: string, code: string) {
-    await api('/auth/confirm', { method: 'POST', body: { email, code } });
+    await api("/auth/confirm", { method: "POST", body: { email, code } });
   }
 
   async function signIn(email: string, password: string) {
     const tokens = await api<{ accessToken: string; refreshToken: string }>(
-      '/auth/login',
+      "/auth/login",
       {
-        method: 'POST',
+        method: "POST",
         body: { email, password },
       },
     );
@@ -603,12 +603,12 @@ const router = useRouter();
 async function onSubmit(payload: FormSubmitEvent<Schema>) {
   try {
     await signIn(payload.data.email, payload.data.password);
-    await router.push('/');
-  } catch (err: any) {
+    await router.push("/");
+  } catch (err: unknown) {
     toast.add({
-      title: 'Login failed',
-      description: err.message,
-      color: 'error',
+      title: "Login failed",
+      description: err instanceof Error ? err.message : String(err),
+      color: "error",
     });
   }
 }
