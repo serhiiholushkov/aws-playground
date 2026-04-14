@@ -26,9 +26,8 @@ export class CognitoStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY, // for playground only.
       userVerification: {
         emailSubject: `Verify your email for AWS Cognito Playground (${props.envName})`,
-        emailBody:
-          'Hello {username},<br><br>Please verify your email by clicking the link below:<br><a href="{##Verify Email##}">Verify Email</a><br><br>Thank you!',
-        emailStyle: cognito.VerificationEmailStyle.LINK,
+        emailBody: 'Hello {username},\n\nYour verification code is: {####}\n\nThank you!',
+        emailStyle: cognito.VerificationEmailStyle.CODE,
       },
       accountRecovery: cognito.AccountRecovery.EMAIL_AND_PHONE_WITHOUT_MFA,
     });
