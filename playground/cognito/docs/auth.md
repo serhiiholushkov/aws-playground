@@ -282,10 +282,9 @@ export default defineNuxtPlugin(() => {
     async onRequest({ options }) {
       const token = await getAccessToken();
       if (token) {
-        options.headers = {
-          ...options.headers,
-          Authorization: `Bearer ${token}`,
-        };
+        const headers = new Headers(options.headers as HeadersInit);
+        headers.set("Authorization", `Bearer ${token}`);
+        options.headers = headers;
       }
     },
   });

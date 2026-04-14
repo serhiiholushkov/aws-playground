@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { FormSubmitEvent } from '@nuxt/ui/runtime/types/form.js'
 import * as z from 'zod'
+import { useAuth } from '~/composables/useAuth'
 
 definePageMeta({
   layout: 'auth',
@@ -58,8 +59,20 @@ const schema = z.object({
 
 type Schema = z.output<typeof schema>
 
-function onSubmit(payload: FormSubmitEvent<Schema>) {
-  console.log('Submitted', payload)
+const { signIn } = useAuth()
+const router = useRouter()
+
+async function onSubmit(payload: FormSubmitEvent<Schema>) {
+  try {
+    await signIn(payload.data.email, payload.data.password)
+    await router.push('/')
+  } catch (err: unknown) {
+    toast.add({
+      title: 'Login failed',
+      description: err instanceof Error ? err.message : 'An unknown error occurred',
+      color: 'error',
+    })
+  }
 }
 </script>
 
