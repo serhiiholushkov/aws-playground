@@ -357,6 +357,7 @@ app.MapGet("/me", (ClaimsPrincipal user) => Results.Ok(new
 Use user-secrets for local development:
 
 ```bash
+dotnet user-secrets init
 dotnet user-secrets set "Cognito:Region"     "us-east-1"
 dotnet user-secrets set "Cognito:UserPoolId" "us-east-1_XXXXXXXXX"
 ```
@@ -512,6 +513,7 @@ record RefreshDto(string RefreshToken);
 **4. Set configuration values**
 
 ```bash
+dotnet user-secrets init
 dotnet user-secrets set "Cognito:Region"     "us-east-1"
 dotnet user-secrets set "Cognito:UserPoolId" "us-east-1_XXXXXXXXX"
 dotnet user-secrets set "Cognito:ClientId"   "26xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
