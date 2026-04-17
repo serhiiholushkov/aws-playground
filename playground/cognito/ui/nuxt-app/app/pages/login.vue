@@ -67,6 +67,11 @@ async function onSubmit(payload: FormSubmitEvent<Schema>) {
     await signIn(payload.data.email, payload.data.password)
     await router.push('/')
   } catch (err: unknown) {
+    // Redirect to the confirm page if the account hasn't been verified yet
+    if (err instanceof Error && err.name === 'UserNotConfirmedException') {
+      await router.push({ path: '/confirm', query: { email: payload.data.email } })
+      return
+    }
     toast.add({
       title: 'Login failed',
       description: err instanceof Error ? err.message : 'An unknown error occurred',

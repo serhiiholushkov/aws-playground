@@ -26,7 +26,14 @@ export function useAuth() {
 
   async function signIn(email: string, password: string): Promise<void> {
     // Uses USER_SRP_AUTH by default (password never sent in plaintext)
-    await amplifySignIn({ username: email, password })
+    const result = await amplifySignIn({ username: email, password })
+
+    // Amplify v6 doesn't throw for an unconfirmed user — it signals via nextStep
+    if (!result.isSignedIn && result.nextStep.signInStep === 'CONFIRM_SIGN_UP') {
+      const error = new Error('User is not confirmed.')
+      error.name = 'UserNotConfirmedException'
+      throw error
+    }
   }
 
   async function signOut(): Promise<void> {
