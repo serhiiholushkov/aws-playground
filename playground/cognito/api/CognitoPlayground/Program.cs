@@ -23,7 +23,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             // Cognito access tokens do not carry an `aud` claim; the client ID
             // appears in the `client_id` claim instead, so audience validation
             // must be disabled when accepting access tokens as Bearer credentials.
-            ValidateAudience = false
+            ValidateAudience = false,
         };
     });
 
@@ -64,18 +64,11 @@ app.MapGet("/weatherforecast", () =>
 
 app.MapGet("/me", (ClaimsPrincipal user) =>
 {
-    if (user.Identity?.IsAuthenticated == true)
+    return new
     {
-        return Results.Ok(new
-        {
-            Name = user.Identity.Name,
-            Claims = user.Claims.Select(c => new { c.Type, c.Value })
-        });
-    }
-    else
-    {
-        return Results.Unauthorized();
-    }
+        sub = user.FindFirst("sub")?.Value,
+        email = user.FindFirst("email")?.Value
+    };
 })
 .RequireAuthorization();
 
