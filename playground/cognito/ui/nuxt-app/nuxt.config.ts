@@ -18,7 +18,7 @@ export default defineNuxtConfig({
   // NUXT_PUBLIC_* env variables automatically override these at runtime
   runtimeConfig: {
     public: {
-      apiBaseUrl: 'http://localhost:5165',
+      apiBaseUrl: 'http://localhost:5186',
       cognitoRegion: 'us-east-1',
       cognitoUserPoolId: '',
       cognitoClientId: '',
