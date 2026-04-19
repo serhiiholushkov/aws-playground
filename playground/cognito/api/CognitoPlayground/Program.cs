@@ -1,4 +1,7 @@
-using System.Security.Claims;
+using Amazon;
+using Amazon.CognitoIdentityProvider;
+using Amazon.CognitoIdentityProvider.Model;
+using Amazon.Runtime;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -62,13 +65,19 @@ app.MapGet("/weatherforecast", () =>
 })
 .WithName("GetWeatherForecast");
 
-app.MapGet("/me", (ClaimsPrincipal user) =>
+app.MapGet("/me", async (HttpContext httpContext) =>
 {
-    return new
-    {
-        sub = user.FindFirst("sub")?.Value,
-        email = user.FindFirst("email")?.Value
-    };
+    string token = httpContext.Request.Headers.Authorization.ToString()["Bearer ".Length..];
+
+    using var cognitoClient = new AmazonCognitoIdentityProviderClient(
+        new AnonymousAWSCredentials(),
+        RegionEndpoint.GetBySystemName(region!));
+
+    GetUserResponse userResponse = await cognitoClient.GetUserAsync(
+        new GetUserRequest { AccessToken = token },
+        httpContext.RequestAborted);
+
+    return userResponse.UserAttributes.ToDictionary(a => a.Name, a => a.Value);
 })
 .RequireAuthorization();
 
